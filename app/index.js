@@ -70,6 +70,9 @@ class App {
             usernameError: document.getElementById('js-login-username-error'),
             passwordError: document.getElementById('js-login-password-error')
         }
+        // Selected use
+        this.selectedChatUser = null;
+
         // It stores the list of users
         this.chatList = [];
         // Binding App class 'this' to these functions
@@ -88,6 +91,10 @@ class App {
         this.loadChatList = this.loadChatList.bind(this)
         //
         this.loadConversation = this.loadConversation.bind(this)
+        //
+        this.sendMessage = this.sendMessage.bind(this)
+        //
+        this.receiveSocketMessages = this.receiveSocketMessages.bind(this)
     }
 
     // It returns value a specific
@@ -253,25 +260,113 @@ class App {
         document.getElementById('js-chat-list-container').innerHTML = rows;
         //
         var els = document.getElementsByClassName('js-chatlist-li');
+
         //
         i = 0;
         for (i; i < il; i++) {
             els[i].addEventListener('click', (e) => {
-                this.loadConversation(e.target.getAttribute('data-id'));
+                this.loadConversation(e.target.getAttribute('data-id'), e.target.innerText);
             }, false)
         }
     }
 
     // Load Conversation
-    async loadConversation(userId) {
+    async loadConversation(userId, userName) {
         var e = await this.chatHttp.getMessages(this.user.id, userId);
+        var messages = e.messages;
+
+        this.selectedChatUser = userId;
+
+        //if user select user to chat then show chat div and hide previous div
+        document.getElementById('no-user-selected').style.display = "none";
+        document.getElementById('user-selected').style.display = "block";
+
+        //creating Chat Div Elements
+        var rows = '';
+        rows += '<div class="opposite-user">Chatting with ' + userName + '</div>';
+
+        //if selected user have chat history then we generate content else shoe message
+        if (messages == undefined || messages.length === 0) {
+            rows += '<div class="message-thread start-chatting-banner">';
+            rows += '    <p class"heading">';
+            rows += "        You haven 't chatted with " + userName + " in a while,";
+            rows += '        <span class="sub-heading"> Say Hi.</span>';
+            rows += '    </p>';
+            rows += '</div>';
+
+        } else {
+            rows += '<div class="message-thread">';
+            rows += '    <ul id="chat-message-section">';
+
+            messages.forEach(function (item, index) {
+                if (item.fromUserId == userId) {
+                    rows += '<li class="">' + item.message + '</li>';
+                } else {
+                    rows += '<li class="align-right">' + item.message + '</li>';
+                }
+            });
+
+            rows += '    </ul>';
+            rows += '</div>';
+        }
+
+        document.getElementById('chat-with-me').innerHTML = rows;
+        document.getElementById('send-message').value = "";
+        this.scrollToBottom()
+
+        var sm = document.getElementById('send-message');
+
+        sm.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                var send_message = document.getElementById('send-message').value.trim();
+
+                if (send_message == '') {
+                    alert('please enter message')
+                    return
+                } else {
+                    var node = document.createElement("LI");
+                    node.setAttribute("class", "align-right");
+                    var message_text = document.createTextNode(send_message);
+                    node.appendChild(message_text);
+                    document.getElementById("chat-message-section").appendChild(node);
+                    document.getElementById('send-message').value = "";
+                    console.log(this.selectedChatUser);
+                    console.log(this.user.id)
+                    this.chatSocket.sendMessage({
+                        fromUserId: this.user.id,
+                        message: send_message,
+                        toUserId: this.selectedChatUser,
+                    })
+                    document.getElementById('send-message').value = '';
+                }
+            }
+        }, false)
+
         // TODO:
         // Load chat in conversation area
+        this.chatSocket.receiveMessage();
+        this.chatSocket.eventEmitter.on('add-message-response', this.receiveSocketMessages);
         // ChatSocketServer.eventEmitter.on('add-message-response', this.receiveSocketMessages);
     }
 
+    receiveSocketMessages(d) {
+        if (d.fromUserId != this.selectedChatUser) return;
+        let message = d.message;
+        var node = document.createElement("LI");
+        // node.setAttribute("class", "align-right");
+        var message_text = document.createTextNode(message);
+        node.appendChild(message_text);
+        document.getElementById("chat-message-section").appendChild(node);
+        this.scrollToBottom()
+    }
+
+    scrollToBottom() {
+        var objDiv = document.getElementsByClassName("message-thread")[0]
+        objDiv.scrollTop = objDiv.scrollHeight;
+    }
+
     //
-    pageHandler() {
+    async pageHandler() {
         switch (this.page) {
             case 'register':
             case 'login':
@@ -285,6 +380,12 @@ class App {
                 break;
             case 'chat':
                 this.eventEmitter.on('chat-list-response', this.loadChatList)
+                if (this.user !== null) {
+                    let r = await this.chatHttp.userSessionCheck(this.user.id)
+                    console.log(r);
+                }
+
+                // document.getElementById('send-message').onKeyPress = this.sendMessage
                 break;
         }
     }
@@ -293,6 +394,11 @@ class App {
     getCalledPage() {
         this.page = window.location.pathname.replace('/', '').trim().toLowerCase()
         if (this.page == '') this.page = 'index'
+    }
+
+    // Set the current page
+    sendMessage() {
+        alert('heree');
     }
 
     // Check INIT
@@ -308,14 +414,16 @@ class App {
             console.log('User not logged in')
             return
         }
-        this.user = response.data.data;
-        // Get and Set the current URL for websocket
-        this.socket = await this.chatSocket.establishSocketConnection(this.user.id);
         //
-        if (this.page == 'chat') {
-            await this.chatSocket.getChatList(this.user.id);
-            this.pageHandler()
-        }
+        this.user = response.data.data;
+        // Set localstorage
+        this.chatHttp.setLS('userid', this.user.id);
+        this.chatHttp.setLS('username', this.user.username);
+        // Get and Set the current URL for websocket
+        this.socket = this.chatSocket.establishSocketConnection(this.user.id);
+        await this.chatSocket.getChatList(this.user.id);
+        //
+        if (this.page == 'chat') this.pageHandler()
         // handling
     }
 

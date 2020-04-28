@@ -11,7 +11,7 @@ class ChatSocket {
 
 
     // Connecting to Socket Server
-    async establishSocketConnection(userId) {
+    establishSocketConnection(userId) {
         try {
             this.socket = io(`http://localhost:4000`, {
                 query: `userId=${userId}`
@@ -26,9 +26,7 @@ class ChatSocket {
         this.socket.emit('chat-list', {
             userId: userId
         });
-        console.log(userId);
         this.socket.on('chat-list-response', (data) => {
-            console.log(data);
             this.eventEmitter.emit('chat-list-response', data);
         });
     }
